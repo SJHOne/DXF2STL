@@ -53,8 +53,7 @@ public static class MeshRepairer
 
     private static void WeldVertices(TriangleMesh mesh)
     {
-        var max = mesh.Vertices.SelectMany(v => new[] { Math.Abs(v.X), Math.Abs(v.Y), Math.Abs(v.Z) }).DefaultIfEmpty(1).Max();
-        var quantum = Math.Max(max * 1e-9, 1e-10);
+        var quantum = Math.Max(Extent(mesh.Vertices) * 1e-9, 1e-12);
         var lookup = new Dictionary<(long X, long Y, long Z), int>();
         var welded = new List<Vector3>();
         var map = new int[mesh.Vertices.Count];
@@ -82,6 +81,8 @@ public static class MeshRepairer
 
     private static void RemoveInvalidTriangles(TriangleMesh mesh)
     {
+        var scale = Extent(mesh.Vertices);
+        var areaTolerance = Math.Max(scale * scale * 1e-14, 1e-24);
         var clean = new List<(int A, int B, int C)>();
         var seen = new HashSet<(int, int, int)>();
         foreach (var triangle in mesh.Triangles)
@@ -91,7 +92,7 @@ public static class MeshRepairer
             var a = mesh.Vertices[triangle.A];
             var b = mesh.Vertices[triangle.B];
             var c = mesh.Vertices[triangle.C];
-            if (Vector3.Cross(b - a, c - a).Length < 1e-12)
+            if (Vector3.Cross(b - a, c - a).Length < areaTolerance)
                 continue;
             var sorted = new[] { triangle.A, triangle.B, triangle.C };
             Array.Sort(sorted);
@@ -157,10 +158,14 @@ public static class MeshRepairer
 
         foreach (var component in components)
         {
+            var origin = mesh.Vertices[mesh.Triangles[component[0]].A];
             var volume = component.Sum(index =>
             {
                 var t = mesh.Triangles[index];
-                return Vector3.Dot(mesh.Vertices[t.A], Vector3.Cross(mesh.Vertices[t.B], mesh.Vertices[t.C])) / 6;
+                var a = mesh.Vertices[t.A] - origin;
+                var b = mesh.Vertices[t.B] - origin;
+                var c = mesh.Vertices[t.C] - origin;
+                return Vector3.Dot(a, Vector3.Cross(b, c)) / 6;
             });
             if (volume < 0)
                 foreach (var index in component)
@@ -234,6 +239,16 @@ public static class MeshRepairer
 
     private static Dictionary<(int A, int B), int> BuildEdgeCounts(TriangleMesh mesh) =>
         BuildEdges(mesh).ToDictionary(edge => edge.Key, edge => edge.Value.Count);
+
+    private static double Extent(IReadOnlyList<Vector3> points)
+    {
+        if (points.Count == 0)
+            return 1;
+        return Math.Max(
+            Math.Max(points.Max(point => point.X) - points.Min(point => point.X),
+                     points.Max(point => point.Y) - points.Min(point => point.Y)),
+            points.Max(point => point.Z) - points.Min(point => point.Z));
+    }
 
     private static void Flip(TriangleMesh mesh, int index)
     {

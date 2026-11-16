@@ -11,7 +11,12 @@ public readonly record struct Vector3(double X, double Y, double Z)
     public double Length => Math.Sqrt(X * X + Y * Y + Z * Z);
 }
 
-public sealed record Profile(string Name, IReadOnlyList<(double X, double Y)> Points)
+public sealed record Profile(
+    string Name,
+    IReadOnlyList<(double X, double Y)> Points,
+    IReadOnlyList<IReadOnlyList<(double X, double Y)>> Holes)
 {
+    public IReadOnlyList<Profile> Children { get; init; } = [];
+
     public override string ToString() => Name;
 }

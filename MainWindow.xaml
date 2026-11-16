@@ -22,7 +22,7 @@
                 <ColumnDefinition Width="12"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <GroupBox Header="Closed profiles (Ctrl/Shift-click to select)" Grid.Column="0">
+            <GroupBox Header="Closed faces (Ctrl/Shift-click to select)" Grid.Column="0">
                 <ListBox x:Name="ProfileList" SelectionMode="Extended"
                          SelectionChanged="ProfileList_SelectionChanged"
                          Margin="5" BorderThickness="0"/>

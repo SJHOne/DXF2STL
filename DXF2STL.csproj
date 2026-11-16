@@ -7,4 +7,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Dxf2Stl</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Earcut.NET" Version="1.2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Tests\**\*.cs" />
+  </ItemGroup>
 </Project>

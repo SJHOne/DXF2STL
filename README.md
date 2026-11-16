@@ -21,9 +21,10 @@ To build without launching it:
 dotnet build .\DXF2STL.csproj
 ```
 
-Open a DXF from the application. The preview shows the imported profiles;
-Ctrl-click or Shift-click to select multiple profiles for extrusion. Choose an
-operation, enter its distance or angle, and export an STL file.
+Open a DXF from the application. The preview shows imported filled faces and
+their hole boundaries; Ctrl-click or Shift-click to select multiple faces for
+extrusion. Choose an operation, enter its distance or angle, and export an STL
+file.
 
 ## Implemented functionality
 
@@ -36,20 +37,29 @@ The importer reads **ASCII DXF** and recognizes:
 - Closed 2D `POLYLINE` entities.
 - `CIRCLE` entities (approximated as 96 straight segments).
 
-Imported contours appear in a list and a 2D preview. The importer does not
-currently read binary DXF, open curves, 3D entities, blocks, or nested contour
-relationships. Each closed contour is currently considered an independent
-filled profile.
+Closed contours are grouped by geometric containment using the even-odd rule,
+independent of DXF winding: each even-depth contour creates a filled face, and
+its immediate odd-depth children are holes. A contour inside a hole is a
+separate selectable island face. Extrusion selection acts on a face and its
+holes together. Reversed ring winding is normalized during import.
+
+The importer rejects zero-area and self-intersecting contours, duplicate
+boundaries, and contour pairs that touch or cross. Containment tolerances are
+relative to the full drawing extent (1e-9, with a 1e-12 coordinate-unit
+minimum). Unsupported input includes binary DXF, open curves, 3D entities,
+blocks, and non-planar boundaries. The importer only considers closed planar
+polylines and circles.
 
 ### Extrusion
 
-Select one or more profiles, enter a non-zero extrusion distance, and export.
-The profiles are extruded from Z=0 by the entered distance; a negative distance
-extrudes in the negative Z direction. Concave simple polygons are supported.
+Select one or more faces, enter a non-zero extrusion distance, and export.
+Faces with multiple holes and nested islands are supported. The faces are
+extruded from Z=0 by the entered distance; a negative distance extrudes in the
+negative Z direction. Concave polygons are supported.
 
 ### Revolution
 
-The revolution operation acts on **all loaded profiles** and sweeps them around
+The revolution operation acts on **all loaded faces** and sweeps them around
 the selected origin axis:
 
 - **Y** is the default axis; **X** is also available.
@@ -58,8 +68,9 @@ the selected origin axis:
 - Z is intentionally unavailable: revolving an XY profile around Z leaves it
   flat and does not create a printable 3D solid.
 
-Profiles that cross an axis or otherwise create self-intersecting geometry may
-not form valid printable solids. Such input should be validated before use.
+Faces that touch or cross the selected axis are rejected because they can
+create degenerate or self-intersecting solids. Contour nesting is preserved on
+partial-revolution start/end caps and on full-revolution surfaces.
 
 ### Mesh processing and STL export
 
@@ -73,9 +84,10 @@ pipeline:
 5. Checks that every mesh edge belongs to exactly two triangles; export fails
    with an error if the check does not pass.
 
-This boundary-loop repair is for gaps in an output mesh; it does **not** make
-nested DXF contours into designed holes. The topology check also does not
-guarantee the absence of all geometric self-intersections.
+This boundary-loop repair is for gaps in an output mesh. Earcut.NET is used
+for hole-aware cap triangulation, and each cap is checked against its expected
+filled area and hole regions. The topology check does not guarantee the
+absence of every possible geometric self-intersection.
 
 DXF coordinates are written unchanged. STL does not encode units; DXF2STL
 assumes downstream slicers interpret the coordinates as millimetres. Scale the
@@ -83,15 +95,15 @@ input appropriately before export if its coordinates use another unit.
 
 ## Architecture and source map
 
-The application targets `net8.0-windows` and uses WPF for its interface. It has
-no third-party package dependencies.
+The application targets `net8.0-windows` and uses WPF for its interface.
+Earcut.NET provides hole-aware polygon triangulation.
 
 | Area | Source |
 | --- | --- |
 | WPF app startup and window | `App.xaml`, `App.xaml.cs`, `MainWindow.xaml`, `MainWindow.xaml.cs` |
 | ASCII DXF parsing and profile extraction | `Import/DxfProfileReader.cs` |
 | Profile and vector types | `Geometry/Vector3.cs` |
-| Polygon triangulation | `Geometry/PolygonTriangulator.cs` |
+| Polygon triangulation | `Geometry/PolygonTriangulator.cs` (Earcut.NET) |
 | Triangle mesh representation | `Geometry/TriangleMesh.cs` |
 | Mesh repair and watertightness validation | `Geometry/MeshRepairer.cs` |
 | Operation contract and settings | `Operations/IProfileOperation.cs` |
@@ -126,23 +138,16 @@ Keep mesh validation and STL writing shared across operations.
 
 ### Add DXF entities or nested contours
 
-Extend `DxfProfileReader` to parse the desired entities into normalized contour
-data, then keep import separate from face classification and meshing. Nested
-contours require grouping rings into faces, determining containment independent
-of winding, validating touching/crossing boundaries, and using a
-hole-aware triangulator for caps. Extrusion walls must follow both outer and
-hole rings; revolution also needs explicit handling for rings that meet or cross
-the axis.
+Extend `DxfProfileReader` to parse the desired entities into normalized
+`BoundaryContour` data, then keep import separate from face classification and
+meshing. `ContourClassifier` builds even-odd face groups and validates
+boundaries. `PolygonTriangulator` wraps Earcut.NET for caps. Extrusion walls
+follow outer and hole rings; revolution rejects faces that meet or cross the
+axis until those cases are implemented deliberately.
 
-The proposed implementation steps and acceptance criteria are in
-[`NESTED_CONTOURS_PLAN.md`](NESTED_CONTOURS_PLAN.md). Nested holes are planned,
-not currently implemented.
+The original implementation steps and acceptance criteria are in
+[`NESTED_CONTOURS_PLAN.md`](NESTED_CONTOURS_PLAN.md).
 
 ## Verification
 
-The project has been built successfully with `dotnet build`. During development,
-temporary smoke checks exercised DXF profile loading, concave extrusion,
-full and partial Y-axis revolutions, a partial X-axis revolution,
-watertightness, and binary STL length.
-Those temporary checks were removed; a persistent automated test project has
-not yet been added.
+Run the focused geometry/import checks with `dotnet test .\Tests\DXF2STL.Tests.csproj`.

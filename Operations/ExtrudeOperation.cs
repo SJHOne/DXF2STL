@@ -16,8 +16,8 @@ public sealed class ExtrudeOperation : IProfileOperation
         var result = new TriangleMesh();
         foreach (var profile in profiles)
         {
-            var points = profile.Points;
-            var triangles = PolygonTriangulator.Triangulate(points);
+            var points = new[] { profile.Points }.Concat(profile.Holes).SelectMany(ring => ring).ToArray();
+            var triangles = PolygonTriangulator.Triangulate(profile);
             var bottom = points.Select(p => result.AddVertex(new Vector3(p.X, p.Y, 0))).ToArray();
             var top = points.Select(p => result.AddVertex(new Vector3(p.X, p.Y, settings.Amount))).ToArray();
 
@@ -30,14 +30,17 @@ public sealed class ExtrudeOperation : IProfileOperation
                 result.AddTriangle(bottom[c], bottom[b], bottom[a]);
             }
 
-            var counterClockwise = PolygonTriangulator.SignedArea(points) > 0;
-            for (var i = 0; i < points.Count; i++)
+            var offset = 0;
+            foreach (var ring in new[] { profile.Points }.Concat(profile.Holes))
             {
-                var next = (i + 1) % points.Count;
-                var a = counterClockwise ? i : next;
-                var b = counterClockwise ? next : i;
-                result.AddTriangle(bottom[a], bottom[b], top[b]);
-                result.AddTriangle(bottom[a], top[b], top[a]);
+                for (var i = 0; i < ring.Count; i++)
+                {
+                    var a = offset + i;
+                    var b = offset + (i + 1) % ring.Count;
+                    result.AddTriangle(bottom[a], bottom[b], top[b]);
+                    result.AddTriangle(bottom[a], top[b], top[a]);
+                }
+                offset += ring.Count;
             }
         }
 

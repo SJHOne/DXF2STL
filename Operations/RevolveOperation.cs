@@ -23,13 +23,15 @@ public sealed class RevolveOperation : IProfileOperation
 
     private static void AddRevolvedProfile(TriangleMesh mesh, Profile profile, OperationSettings settings)
     {
-        var points = profile.Points;
-        var triangulation = PolygonTriangulator.Triangulate(points);
+        ValidateAxis(profile, settings.Axis);
+        var points = new[] { profile.Points }.Concat(profile.Holes).SelectMany(ring => ring).ToArray();
+        var triangulation = PolygonTriangulator.Triangulate(profile);
         var fullTurn = Math.Abs(Math.Abs(settings.Amount) - 360) < 1e-8;
         var segments = Math.Clamp(settings.Segments, 8, 512);
-        var sliceCount = fullTurn ? segments : segments + 1;
-        var bounds = points.SelectMany(p => new[] { Math.Abs(p.X), Math.Abs(p.Y) }).DefaultIfEmpty(1).Max();
-        var quantum = Math.Max(bounds * 1e-9, 1e-10);
+        var scale = Math.Max(
+            points.Max(point => point.X) - points.Min(point => point.X),
+            points.Max(point => point.Y) - points.Min(point => point.Y));
+        var quantum = Math.Max(scale * 1e-9, 1e-12);
         var vertices = new Dictionary<(long X, long Y, long Z), int>();
 
         int At(int pointIndex, int slice)
@@ -51,22 +53,26 @@ public sealed class RevolveOperation : IProfileOperation
         for (var slice = 0; slice < segments; slice++)
         {
             var nextSlice = fullTurn ? (slice + 1) % segments : slice + 1;
-            for (var i = 0; i < points.Count; i++)
+            var offset = 0;
+            foreach (var ring in new[] { profile.Points }.Concat(profile.Holes))
             {
-                var next = (i + 1) % points.Count;
-                var a = At(i, slice);
-                var b = At(next, slice);
-                var c = At(next, nextSlice);
-                var d = At(i, nextSlice);
-                mesh.AddTriangle(a, b, c);
-                mesh.AddTriangle(a, c, d);
+                for (var i = 0; i < ring.Count; i++)
+                {
+                    var a = At(offset + i, slice);
+                    var b = At(offset + (i + 1) % ring.Count, slice);
+                    var c = At(offset + (i + 1) % ring.Count, nextSlice);
+                    var d = At(offset + i, nextSlice);
+                    mesh.AddTriangle(a, b, c);
+                    mesh.AddTriangle(a, c, d);
+                }
+                offset += ring.Count;
             }
         }
 
         if (!fullTurn)
         {
-            var start = Enumerable.Range(0, points.Count).Select(i => At(i, 0)).ToArray();
-            var end = Enumerable.Range(0, points.Count).Select(i => At(i, segments)).ToArray();
+            var start = Enumerable.Range(0, points.Length).Select(i => At(i, 0)).ToArray();
+            var end = Enumerable.Range(0, points.Length).Select(i => At(i, segments)).ToArray();
             for (var i = 0; i < triangulation.Count; i += 3)
             {
                 var a = triangulation[i];
@@ -76,6 +82,22 @@ public sealed class RevolveOperation : IProfileOperation
                 mesh.AddTriangle(end[c], end[b], end[a]);
             }
         }
+    }
+
+    private static void ValidateAxis(Profile profile, char axis)
+    {
+        var radialCoordinates = new[] { profile.Points }.Concat(profile.Holes)
+            .SelectMany(ring => ring)
+            .Select(point => axis == 'X' ? point.Y : point.X)
+            .ToArray();
+        var scale = Math.Max(
+            profile.Points.Max(point => point.X) - profile.Points.Min(point => point.X),
+            profile.Points.Max(point => point.Y) - profile.Points.Min(point => point.Y));
+        var tolerance = Math.Max(scale * 1e-9, 1e-12);
+        if (radialCoordinates.Any(value => Math.Abs(value) <= tolerance) ||
+            radialCoordinates.Min() < -tolerance && radialCoordinates.Max() > tolerance)
+            throw new InvalidDataException(
+                $"Face '{profile.Name}' touches or crosses the {axis}-axis of revolution; this can create a degenerate or self-intersecting mesh.");
     }
 
     private static Vector3 Rotate(double x, double y, char axis, double angle)

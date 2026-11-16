@@ -44,7 +44,8 @@ public partial class MainWindow : Window
             ProfileList.ItemsSource = _profiles;
             ProfileList.SelectedItems.Clear();
             FileNameText.Text = dialog.FileName;
-            StatusText.Text = $"{_profiles.Count} closed profile(s) loaded. Select face(s) to extrude.";
+            var holeCount = _profiles.Sum(profile => profile.Holes.Count);
+            StatusText.Text = $"{_profiles.Count} face(s) loaded with {holeCount} hole boundary/boundaries. Select face(s) to extrude.";
             DrawPreview();
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
@@ -81,7 +82,7 @@ public partial class MainWindow : Window
             : _profiles;
         if (isExtrude && selectedProfiles.Count == 0)
         {
-            MessageBox.Show(this, "Select one or more closed profiles to extrude.", "No profiles selected",
+            MessageBox.Show(this, "Select one or more closed faces to extrude.", "No faces selected",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
@@ -126,8 +127,8 @@ public partial class MainWindow : Window
         AxisCombo.Visibility = isRevolve ? Visibility.Visible : Visibility.Collapsed;
         if (StatusText is not null)
             StatusText.Text = isRevolve
-                ? "Revolves all profiles around X or Y; Z is unavailable because this XY input would remain flat. Use 360 degrees for a full turn."
-                : "Select one or more profiles, then extrude them by the entered distance.";
+                ? "Revolves all faces around X or Y; Z is unavailable because this XY input would remain flat. Use 360 degrees for a full turn."
+                : "Select one or more faces, then extrude them by the entered distance.";
     }
 
     private void ProfileList_SelectionChanged(object sender, SelectionChangedEventArgs e) => DrawPreview();
@@ -141,10 +142,11 @@ public partial class MainWindow : Window
         if (_profiles.Count == 0 || PreviewCanvas.ActualWidth < 2 || PreviewCanvas.ActualHeight < 2)
             return;
 
-        var minX = _profiles.SelectMany(p => p.Points).Min(p => p.X);
-        var maxX = _profiles.SelectMany(p => p.Points).Max(p => p.X);
-        var minY = _profiles.SelectMany(p => p.Points).Min(p => p.Y);
-        var maxY = _profiles.SelectMany(p => p.Points).Max(p => p.Y);
+        var rings = _profiles.SelectMany(profile => new[] { profile.Points }.Concat(profile.Holes)).ToArray();
+        var minX = rings.SelectMany(ring => ring).Min(p => p.X);
+        var maxX = rings.SelectMany(ring => ring).Max(p => p.X);
+        var minY = rings.SelectMany(ring => ring).Min(p => p.Y);
+        var maxY = rings.SelectMany(ring => ring).Max(p => p.Y);
         var rangeX = Math.Max(maxX - minX, 1e-9);
         var rangeY = Math.Max(maxY - minY, 1e-9);
         var scale = Math.Min((PreviewCanvas.ActualWidth - 36) / rangeX, (PreviewCanvas.ActualHeight - 36) / rangeY);
@@ -154,16 +156,19 @@ public partial class MainWindow : Window
 
         foreach (var profile in _profiles)
         {
-            var shape = new System.Windows.Shapes.Polyline
+            foreach (var ring in new[] { profile.Points }.Concat(profile.Holes))
             {
-                Points = new PointCollection(profile.Points.Select(p =>
-                    new Point(offsetX + (p.X - minX) * scale, PreviewCanvas.ActualHeight - offsetY - (p.Y - minY) * scale))),
-                Stroke = selected.Contains(profile) ? Brushes.DodgerBlue : Brushes.DimGray,
-                StrokeThickness = selected.Contains(profile) ? 2.5 : 1.4,
-                Fill = selected.Contains(profile) ? new SolidColorBrush(Color.FromArgb(35, 30, 144, 255)) : Brushes.Transparent,
-                IsHitTestVisible = false
-            };
-            PreviewCanvas.Children.Add(shape);
+                var shape = new System.Windows.Shapes.Polygon
+                {
+                    Points = new PointCollection(ring.Select(p =>
+                        new Point(offsetX + (p.X - minX) * scale, PreviewCanvas.ActualHeight - offsetY - (p.Y - minY) * scale))),
+                    Stroke = selected.Contains(profile) ? Brushes.DodgerBlue : Brushes.DimGray,
+                    StrokeThickness = selected.Contains(profile) ? 2.5 : 1.4,
+                    Fill = Brushes.Transparent,
+                    IsHitTestVisible = false
+                };
+                PreviewCanvas.Children.Add(shape);
+            }
         }
     }
 }

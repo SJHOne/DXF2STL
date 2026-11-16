@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="DXF2STL.csproj" />
+  <Project Path="Tests\DXF2STL.Tests.csproj" />
+</Solution>

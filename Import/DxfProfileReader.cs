@@ -6,7 +6,7 @@ namespace Dxf2Stl.Import;
 public sealed class DxfProfileReader
 {
     private readonly record struct Pair(int Code, string Value);
-    private readonly record struct Vertex(double X, double Y, double Bulge);
+    private readonly record struct Vertex(double X, double Y, double Z, double Bulge);
 
     public IReadOnlyList<Profile> Read(string path)
     {
@@ -23,7 +23,7 @@ public sealed class DxfProfileReader
         }
 
         var entities = ReadEntityChunks(pairs);
-        var profiles = new List<Profile>();
+        var contours = new List<BoundaryContour>();
         for (var i = 0; i < entities.Count; i++)
         {
             var chunk = entities[i];
@@ -31,7 +31,7 @@ public sealed class DxfProfileReader
             {
                 case "LWPOLYLINE":
                     if (TryReadClosedPolyline(chunk, out var lightPoints))
-                        AddProfile(profiles, $"Polyline {profiles.Count + 1}", lightPoints);
+                        AddContour(contours, $"LWPOLYLINE {contours.Count + 1}", lightPoints);
                     break;
                 case "POLYLINE":
                     var vertices = new List<Vertex>();
@@ -39,28 +39,34 @@ public sealed class DxfProfileReader
                     while (j < entities.Count && Value(entities[j], 0) == "VERTEX")
                         vertices.Add(ReadVertex(entities[j++]));
                     i = j < entities.Count && Value(entities[j], 0) == "SEQEND" ? j : j - 1;
-                    if ((Integer(chunk, 70) & 1) != 0 && Math.Abs(Number(chunk, 30)) < 1e-9)
-                        AddProfile(profiles, $"Polyline {profiles.Count + 1}", ExpandBulges(vertices, true));
+                    var polylineFlags = Integer(chunk, 70);
+                    if ((polylineFlags & 1) != 0 && (polylineFlags & (8 | 16 | 32 | 64)) == 0 &&
+                        Math.Abs(Number(chunk, 30)) < 1e-9 && vertices.All(vertex => Math.Abs(vertex.Z) < 1e-9))
+                        AddContour(contours, $"POLYLINE {contours.Count + 1}", ExpandBulges(vertices, true));
                     break;
                 case "CIRCLE":
                     var radius = Number(chunk, 40);
-                    if (radius > 0 && Math.Abs(Number(chunk, 30)) < 1e-9)
+                    if (Math.Abs(Number(chunk, 30)) < 1e-9)
                     {
-                        var centerX = Number(chunk, 10);
-                        var centerY = Number(chunk, 20);
+                        if (!double.IsFinite(radius) || radius <= 0)
+                            throw new InvalidDataException($"Circle {contours.Count + 1} has an invalid radius.");
+                        var centerX = RequiredNumber(chunk, 10);
+                        var centerY = RequiredNumber(chunk, 20);
+                        if (!double.IsFinite(centerX) || !double.IsFinite(centerY))
+                            throw new InvalidDataException($"Circle {contours.Count + 1} has a non-finite center.");
                         var points = Enumerable.Range(0, 96)
                             .Select(k => (centerX + radius * Math.Cos(2 * Math.PI * k / 96),
                                           centerY + radius * Math.Sin(2 * Math.PI * k / 96)))
                             .ToList();
-                        AddProfile(profiles, $"Circle {profiles.Count + 1}", points);
+                        AddContour(contours, $"CIRCLE {contours.Count + 1}", points);
                     }
                     break;
             }
         }
 
-        if (profiles.Count == 0)
+        if (contours.Count == 0)
             throw new InvalidDataException("No closed 2D polylines or circles were found in the DXF.");
-        return profiles;
+        return ContourClassifier.Classify(contours);
     }
 
     private static List<List<Pair>> ReadEntityChunks(IReadOnlyList<Pair> pairs)
@@ -104,7 +110,9 @@ public sealed class DxfProfileReader
     private static bool TryReadClosedPolyline(List<Pair> chunk, out List<(double X, double Y)> points)
     {
         points = [];
-        if ((Integer(chunk, 70) & 1) == 0 || Math.Abs(Number(chunk, 38)) > 1e-9 || Math.Abs(Number(chunk, 30)) > 1e-9)
+        var flags = Integer(chunk, 70);
+        if ((flags & 1) == 0 || (flags & (8 | 16 | 32 | 64)) != 0 ||
+            Math.Abs(Number(chunk, 38)) > 1e-9 || Math.Abs(Number(chunk, 30)) > 1e-9)
             return false;
 
         var vertices = new List<Vertex>();
@@ -113,10 +121,10 @@ public sealed class DxfProfileReader
             if (chunk[i].Code != 10)
                 continue;
             var x = ParseDouble(chunk[i].Value);
-            var y = i + 1 < chunk.Count && chunk[i + 1].Code == 20
-                ? ParseDouble(chunk[++i].Value)
-                : 0;
-            vertices.Add(new Vertex(x, y, 0));
+            if (i + 1 >= chunk.Count || chunk[i + 1].Code != 20)
+                throw new InvalidDataException("A closed polyline vertex is missing its Y coordinate.");
+            var y = ParseDouble(chunk[++i].Value);
+            vertices.Add(new Vertex(x, y, 0, 0));
         }
 
         for (var i = 0; i < chunk.Count; i++)
@@ -128,14 +136,14 @@ public sealed class DxfProfileReader
             }
         }
         points = ExpandBulges(vertices, true);
-        return points.Count >= 3;
+        return true;
     }
 
     private static int CountCode(List<Pair> chunk, int code, int beforeIndex) =>
         chunk.Take(beforeIndex).Count(p => p.Code == code);
 
     private static Vertex ReadVertex(List<Pair> chunk) =>
-        new(Number(chunk, 10), Number(chunk, 20), Number(chunk, 42));
+        new(RequiredNumber(chunk, 10), RequiredNumber(chunk, 20), Number(chunk, 30), Number(chunk, 42));
 
     private static List<(double X, double Y)> ExpandBulges(IReadOnlyList<Vertex> vertices, bool closed)
     {
@@ -175,11 +183,10 @@ public sealed class DxfProfileReader
         return result;
     }
 
-    private static void AddProfile(List<Profile> profiles, string name, List<(double X, double Y)> points)
+    private static void AddContour(List<BoundaryContour> contours, string name, List<(double X, double Y)> points)
     {
         RemoveDuplicateClosingPoint(points);
-        if (points.Count >= 3 && Math.Abs(PolygonTriangulator.SignedArea(points)) > 1e-12)
-            profiles.Add(new Profile(name, points));
+        contours.Add(new BoundaryContour(name, points));
     }
 
     private static void RemoveDuplicateClosingPoint(List<(double X, double Y)> points)
@@ -197,8 +204,22 @@ public sealed class DxfProfileReader
     private static string Value(List<Pair> pairs, int code) => pairs.FirstOrDefault(p => p.Code == code).Value ?? "";
     private static int Integer(List<Pair> pairs, int code) =>
         int.TryParse(Value(pairs, code), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0;
-    private static double Number(List<Pair> pairs, int code) =>
-        double.TryParse(Value(pairs, code), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : 0;
+    private static double Number(List<Pair> pairs, int code)
+    {
+        var text = Value(pairs, code);
+        if (text.Length == 0)
+            return 0;
+        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            return value;
+        throw new InvalidDataException($"Invalid numeric value for DXF group code {code}: {text}");
+    }
+
+    private static double RequiredNumber(List<Pair> pairs, int code)
+    {
+        if (!pairs.Any(pair => pair.Code == code))
+            throw new InvalidDataException($"DXF entity is missing required group code {code}.");
+        return Number(pairs, code);
+    }
     private static double ParseDouble(string value) =>
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var result)
             ? result
