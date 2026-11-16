@@ -24,7 +24,9 @@ dotnet build .\DXF2STL.csproj
 Open a DXF from the application. The preview shows imported filled faces and
 their hole boundaries; Ctrl-click or Shift-click to select multiple faces for
 extrusion. Choose an operation, enter its distance or angle, and export an STL
-file.
+file. The **3D preview** tab displays the current operation result before
+export; drag with the left mouse button to rotate, use the wheel to zoom, and
+select **Fit view** to restore the initial framing.
 
 ## Implemented functionality
 

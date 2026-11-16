@@ -9,6 +9,17 @@ public static class StlWriter
     public static void WriteBinary(string path, TriangleMesh mesh)
     {
         MeshRepairer.Repair(mesh);
+        WriteMesh(path, mesh);
+    }
+
+    public static void WritePreparedBinary(string path, TriangleMesh mesh)
+    {
+        MeshRepairer.EnsureWatertight(mesh);
+        WriteMesh(path, mesh);
+    }
+
+    private static void WriteMesh(string path, TriangleMesh mesh)
+    {
         using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: false);
         var header = new byte[80];

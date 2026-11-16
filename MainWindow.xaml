@@ -29,10 +29,51 @@
             </GroupBox>
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center"
                           VerticalAlignment="Stretch" Background="#D0D0D0"/>
-            <GroupBox Header="2D preview" Grid.Column="2">
-                <Canvas x:Name="PreviewCanvas" Background="#FAFAFA"
-                        SizeChanged="PreviewCanvas_SizeChanged" ClipToBounds="True"/>
-            </GroupBox>
+            <TabControl Grid.Column="2">
+                <TabItem Header="2D preview">
+                    <Canvas x:Name="PreviewCanvas" Background="#FAFAFA"
+                            SizeChanged="PreviewCanvas_SizeChanged" ClipToBounds="True"/>
+                </TabItem>
+                <TabItem Header="3D preview">
+                    <Grid Background="#FAFAFA">
+                        <Viewport3D x:Name="Preview3DViewport"
+                                    MouseLeftButtonDown="Preview3DViewport_MouseLeftButtonDown"
+                                    MouseMove="Preview3DViewport_MouseMove"
+                                    MouseLeftButtonUp="Preview3DViewport_MouseLeftButtonUp"
+                                    LostMouseCapture="Preview3DViewport_LostMouseCapture"
+                                    MouseWheel="Preview3DViewport_MouseWheel">
+                            <Viewport3D.Camera>
+                                <PerspectiveCamera x:Name="Preview3DCamera"
+                                                   FieldOfView="45"
+                                                   UpDirection="0,0,1"/>
+                            </Viewport3D.Camera>
+                            <ModelVisual3D>
+                                <ModelVisual3D.Content>
+                                    <Model3DGroup>
+                                        <AmbientLight Color="#777777"/>
+                                        <DirectionalLight Color="White" Direction="-1,-2,-3"/>
+                                        <DirectionalLight Color="#707070" Direction="1,2,-1"/>
+                                    </Model3DGroup>
+                                </ModelVisual3D.Content>
+                            </ModelVisual3D>
+                            <ModelVisual3D x:Name="Preview3DModelVisual"/>
+                        </Viewport3D>
+                        <TextBlock x:Name="Preview3DStatusText"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Margin="24" Foreground="#555555" TextAlignment="Center"
+                                   Text="Load a DXF to preview a 3D mesh."
+                                   IsHitTestVisible="False"/>
+                        <DockPanel LastChildFill="False" VerticalAlignment="Top"
+                                   Margin="8" IsHitTestVisible="True">
+                            <Button Content="Fit view" Width="76" Height="28"
+                                    Click="FitView_Click" DockPanel.Dock="Right"/>
+                            <TextBlock Text="Drag to rotate  |  Wheel to zoom"
+                                       VerticalAlignment="Center" Margin="0,0,10,0"
+                                       Foreground="#555555" DockPanel.Dock="Right"/>
+                        </DockPanel>
+                    </Grid>
+                </TabItem>
+            </TabControl>
         </Grid>
 
         <Border Grid.Row="2" Margin="0,12,0,8" Padding="10" BorderBrush="#D0D0D0"
@@ -44,11 +85,13 @@
                           SelectionChanged="OperationCombo_SelectionChanged"/>
                 <TextBlock x:Name="AmountLabel" Text="Extrusion distance" VerticalAlignment="Center" Margin="0,0,7,0"/>
                 <TextBox x:Name="AmountText" Text="10" Width="88" Height="28" Margin="0,0,18,0"
+                         TextChanged="AmountText_TextChanged"
                          VerticalContentAlignment="Center"/>
                 <TextBlock x:Name="AxisLabel" Text="Axis" VerticalAlignment="Center" Margin="0,0,7,0"
                            Visibility="Collapsed"/>
                 <ComboBox x:Name="AxisCombo" Width="70" Height="28" SelectedIndex="1"
-                          Visibility="Collapsed">
+                          Visibility="Collapsed"
+                          SelectionChanged="AxisCombo_SelectionChanged">
                     <ComboBoxItem Content="X"/>
                     <ComboBoxItem Content="Y"/>
                 </ComboBox>
